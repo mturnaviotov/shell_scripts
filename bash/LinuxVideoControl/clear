@@ -1,0 +1,62 @@
+#!/bin/sh
+
+## Скрипт, удаляющий все видеофайлы старше Х дней локально на видеосервере.
+
+# Version 1.0
+
+# Подключаем общую для всех скриптов библиотеку функций.
+. ./functions
+
+#
+# Первичные процедуры - создание файла блокировки, запись в лог файл о начале выполнения.
+#
+
+lock_on
+log_msg "Запущен"
+
+#####
+
+# Основная программа.
+
+unixdate=`date +%s` # текущая дата в скундах.
+timediff=`echo "$unixdate"-"$offset" | bc` # разница между текущим временем в секундах и offset'ом.
+
+# Ищем все файлы по шаблону AA.avi, убирая из вывода каталоги, выходные файлы и файлы текущей даты во временный файл.
+find "$camshare" -name '[0-9][0-9].avi' | awk '{FS="/"} {print"/"$2"/"$3"/"$4"/"$5"/"$6"/"$7"/"$8}' | grep -v '/$' | grep -v "$outfiles" | grep -v `date +%Y%m%d` > $camshare$tmpfile
+
+# В цикле проходим построчно по временному файлу.
+for source in `cat "$camshare$tmpfile"` ;
+do
+    city=`echo "$source" | awk -F / '{ print $5 }'` # Выделяем в переменную "город". (Зависит от настройки и названия камер и структуры их дерева)
+    date=`echo "$source" | awk -F / '{ print $7 }'` # -"- "дата".
+    fname=`echo "$source" | awk -F / '{ print $8 }'` # -"- "имя файла".
+    filedate=`ls -l --time-style=long-iso "$source" | awk '{print $6}'` # дата файла.
+    unixfiledate=`date +%s -d"$filedate"` # переводим дату файла в секунды.
+    outfilename="$camshare$outfiles$city/$date/$fname" # формируем имя выходного файла.
+
+    # Если файл уже выгружен на фтп сервер, удаляем его с сервера наблюдения, если он старше timediff'а, если нет - оставляем.
+    if [ -f "$outfilename" ] ; then
+    echo "$outfilename присутствует в хранилище."
+	if [ "$unixfiledate" -lt "$timediff" ] ; then
+	echo "$source удален."
+	    rm "$source"
+	else
+	    echo "$source" "$unixfiledate пропущен."
+	fi
+    else
+	echo "Файл $outfilename не существует."
+    fi
+done
+
+# Удаляем пустые каталоги.
+find "$camshare" -type d -empty | grep 'video' | xargs rm -fr {}
+
+#####
+
+# 
+# Окончательные процедуры - удаление временного файла, запись в лог-файл, удаление файла блокировки.
+#
+
+clear_tmp
+log_msg "Завершен"
+lock_off
